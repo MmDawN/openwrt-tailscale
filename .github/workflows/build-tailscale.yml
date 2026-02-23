@@ -231,17 +231,30 @@ jobs:
           echo "CONFIG_USE_APK=y" >> /builder/.config
           make defconfig > /dev/null 2>&1
 
-          [ -f /builder/go/bin/go ] || { echo "Error: Go binary missing"; exit 1; }
-          
+          [ -x /builder/go/bin/go ] || { echo "Error: Go binary missing"; exit 1; }
+
+          GO_SEMVER=$(/builder/go/bin/go env GOVERSION | sed 's/^go//')
+          GO_MM=$(echo "$GO_SEMVER" | cut -d. -f1,2)
+          GO_DEFAULT_VERSION=$(sed -n 's/^GO_DEFAULT_VERSION:=\(.*\)/\1/p' /builder/feeds/packages/lang/golang/golang-values.mk | tr -d '[:space:]' | head -n1)
+
           mkdir -p /builder/staging_dir/hostpkg/bin
           ln -sf /builder/go/bin/go /builder/staging_dir/hostpkg/bin/go
           ln -sf /builder/go/bin/gofmt /builder/staging_dir/hostpkg/bin/gofmt
-          
+
+          for ver in "$GO_MM" "$GO_SEMVER" "$GO_DEFAULT_VERSION"; do
+            [ -n "$ver" ] || continue
+            mkdir -p "/builder/staging_dir/hostpkg/lib/go-$ver/bin"
+            ln -sf /builder/go/bin/go "/builder/staging_dir/hostpkg/lib/go-$ver/bin/go"
+            ln -sf /builder/go/bin/gofmt "/builder/staging_dir/hostpkg/lib/go-$ver/bin/gofmt"
+          done
+
           if [ -d /builder/staging_dir/hostpkg/lib/go-cross/bin ]; then
             ln -sf /builder/go/bin/go /builder/staging_dir/hostpkg/lib/go-cross/bin/go
+            ln -sf /builder/go/bin/gofmt /builder/staging_dir/hostpkg/lib/go-cross/bin/gofmt
           fi
-          
-          echo "Using $(/builder/go/bin/go version)"
+
+          export PATH="/builder/go/bin:$PATH"
+          echo "Using $(go version), OpenWrt GO_DEFAULT_VERSION=${GO_DEFAULT_VERSION:-unknown}"
           
           make package/tailscale/compile V=s
           
