@@ -404,9 +404,43 @@ jobs:
                 apk_bin="$(command -v apk)"
               fi
               [ -x "$apk_bin" ] || { echo "Error: apk tool not found"; exit 1; }
-              apk_files=$(ls -1 *.apk | sort)
-              [ -n "$apk_files" ] || { echo "Error: no apk files for index generation"; exit 1; }
-              $apk_bin mkndx --allow-untrusted --output packages.adb $apk_files
+
+              mapfile -t apk_files < <(find . -maxdepth 1 -type f -name "*.apk" -printf "%f\n" | sort)
+              [ ${#apk_files[@]} -gt 0 ] || { echo "Error: no apk files for index generation"; exit 1; }
+
+              rm -f packages.adb
+              failed=0
+
+              for f in "${apk_files[@]}"; do
+                echo "Indexing $f ..."
+
+                # 先做一次 adb 结构检查，定位坏包并避免 mkndx 直接崩溃
+                if ! "$apk_bin" adbdump --format json "$f" >/dev/null 2>&1; then
+                  echo "Error: invalid apk format: $f"
+                  failed=1
+                  continue
+                fi
+
+                if [ -f packages.adb ]; then
+                  tmp_index="$(mktemp)"
+                  if ! "$apk_bin" mkndx --allow-untrusted --index packages.adb --output "$tmp_index" "$f"; then
+                    echo "Error: mkndx failed on $f"
+                    rm -f "$tmp_index"
+                    failed=1
+                    continue
+                  fi
+                  mv -f "$tmp_index" packages.adb
+                else
+                  if ! "$apk_bin" mkndx --allow-untrusted --output packages.adb "$f"; then
+                    echo "Error: mkndx failed on $f"
+                    failed=1
+                    continue
+                  fi
+                fi
+              done
+
+              [ -f packages.adb ] || { echo "Error: failed to generate packages.adb"; exit 1; }
+              [ "$failed" -eq 0 ] || { echo "Error: one or more apk files failed indexing"; exit 1; }
             '
 
       - name: Deploy to Feed Branch
