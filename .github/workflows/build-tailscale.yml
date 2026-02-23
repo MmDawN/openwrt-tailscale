@@ -12,9 +12,9 @@ env:
   SOFTWARE_NAME: "Tailscale"
   FILE_NAME: "tailscaled"
   REPO: "tailscale/tailscale"
-  REPO_SMALL: "GuNanOvO/openwrt-tailscale"
+  REPO_SMALL: "MmDawN/openwrt-tailscale"
   REPO_SMALL_NAME: "openwrt-tailscale"
-  REPO_SMALL_OWNER: "GuNanOvO"
+  REPO_SMALL_OWNER: "MmDawN"
   ARTIFACT_DIR: "artifacts"
   BUILD_DATE: ""
 
@@ -23,9 +23,9 @@ jobs:
     name: Prepare UPX and Go
     runs-on: ubuntu-latest
     outputs:
-      upx_tag: ${{ steps.set_upx_path.outputs.upx_tag }}
-      upx_ver: ${{ steps.set_upx_path.outputs.upx_ver }}
-      go_version: ${{ steps.set_go_path.outputs.go_version }}
+      upx_tag: ${{ steps.check_upx.outputs.upx_tag }}
+      upx_ver: ${{ steps.check_upx.outputs.upx_ver }}
+      go_version: ${{ steps.check_go.outputs.go_version }}
     steps:
       # ----------------- UPX -----------------
       - name: Check UPX Latest Version
@@ -123,7 +123,7 @@ jobs:
     strategy:
       matrix:
         sdk:
-          - 24.10.4
+          - 25.12.0-rc5
         platform:
           - 'aarch64_cortex-a53'
           - 'aarch64_cortex-a72'
@@ -228,6 +228,7 @@ jobs:
           mkdir -p /builder/package/tailscale
           cp -r /builder/tailscale/. /builder/package/tailscale/
           
+          echo "CONFIG_USE_APK=y" >> /builder/.config
           make defconfig > /dev/null 2>&1
 
           [ -f /builder/go/bin/go ] || { echo "Error: Go binary missing"; exit 1; }
@@ -244,12 +245,12 @@ jobs:
           
           make package/tailscale/compile V=s
           
-          IPKS=$(find bin/packages bin/targets -name "tailscale_*.ipk" -type f)
-          if [ -n "$IPKS" ]; then
+          APKS=$(find bin/packages bin/targets -name "tailscale*.apk" -type f)
+          if [ -n "$APKS" ]; then
             echo "Build Success:"
-            ls -lh $IPKS
+            ls -lh $APKS
           else
-            echo "Error: No IPK found" && exit 1
+            echo "Error: No APK found" && exit 1
           fi
           BUILD_SCRIPT_END
           
@@ -271,30 +272,30 @@ jobs:
         run: |
           mkdir -p "${{ env.ARTIFACT_DIR }}"
 
-          echo "Searching for IPK for platform: ${{ matrix.platform }}..."
+          echo "Searching for APK for platform: ${{ matrix.platform }}..."
           
           if [ -d "bin/packages/${{ matrix.platform }}" ]; then
-            mapfile -t ipk_files < <(find "bin/packages/${{ matrix.platform }}" -name "tailscale_*.ipk" -type f)
+            mapfile -t apk_files < <(find "bin/packages/${{ matrix.platform }}" -name "tailscale*.apk" -type f)
           else
-            mapfile -t ipk_files < <(find bin -name "tailscale_*.ipk" -type f)
+            mapfile -t apk_files < <(find bin -name "tailscale*.apk" -type f)
           fi
 
-          if [ ${#ipk_files[@]} -eq 0 ]; then
-            echo "::error::No IPK files found for ${{ matrix.platform }}!"
+          if [ ${#apk_files[@]} -eq 0 ]; then
+            echo "::error::No APK files found for ${{ matrix.platform }}!"
             exit 1
           fi
 
-          source_ipk=$(ls -t "${ipk_files[@]}" | head -n 1)
+          source_apk=$(ls -t "${apk_files[@]}" | head -n 1)
           
-          target_ipk="${{ env.ARTIFACT_DIR }}/tailscale_${{ env.PKG_VERSION }}_${{ matrix.platform }}.ipk"
+          target_apk="${{ env.ARTIFACT_DIR }}/tailscale_${{ env.PKG_VERSION }}_${{ matrix.platform }}.apk"
 
-          echo "Found IPK: $source_ipk"
-          echo "Collecting to: $target_ipk"
+          echo "Found APK: $source_apk"
+          echo "Collecting to: $target_apk"
           
-          cp -v "$source_ipk" "$target_ipk"
+          cp -v "$source_apk" "$target_apk"
 
-          if [ ! -s "$target_ipk" ]; then
-            echo "::error::Artifact collection failed: $target_ipk is missing or empty!"
+          if [ ! -s "$target_apk" ]; then
+            echo "::error::Artifact collection failed: $target_apk is missing or empty!"
             exit 1
           fi
 
@@ -332,45 +333,31 @@ jobs:
       - name: Organize and Generate Files
         run: |
           JSON_FILE="${{ env.ARTIFACT_DIR }}/artifacts.json"
-          PACKAGES_FILE="${{ env.ARTIFACT_DIR }}/Packages"
           
           echo "[" > "$JSON_FILE"
-          : > "$PACKAGES_FILE" # 使用 : > 清空文件更简洁
           
           first=true
+          apk_count=0
           # 遍历所有下载的 artifacts 目录
           for dir in temp_artifacts/*/; do
             [ -d "$dir" ] || continue
             
-            ipk_path=$(find "$dir" -name "tailscale_*.ipk" -type f | head -n 1)
-            [ -z "$ipk_path" ] && continue
+            apk_path=$(find "$dir" -name "tailscale_*.apk" -type f | head -n 1)
+            [ -z "$apk_path" ] && continue
             
-            ipk_name=$(basename "$ipk_path")
+            apk_name=$(basename "$apk_path")
             
             # 改进后的架构提取逻辑：提取第3个下划线之后的部分
-            arch=$(echo "$ipk_name" | cut -d'_' -f3- | sed 's/\.ipk$//')
+            arch=$(echo "$apk_name" | cut -d'_' -f3- | sed 's/\.apk$//')
             
-            # 复制 IPK 到发布目录
-            cp "$ipk_path" "${{ env.ARTIFACT_DIR }}/"
+            # 复制 APK 到发布目录
+            cp "$apk_path" "${{ env.ARTIFACT_DIR }}/"
             
-            echo "Processing $ipk_name for $arch..."
+            echo "Processing $apk_name for $arch..."
             
-            # 提取 control 内容
-            CONTROL_CONTENT=$(tar -xOzf "$ipk_path" ./control.tar.gz | tar -xOzf - ./control 2>/dev/null || \
-                              tar -xOzf "$ipk_path" control.tar.gz | tar -xOzf - control)
             # 计算文件大小和 SHA256
-            FILE_SIZE=$(stat -c%s "$ipk_path")
-            FILE_SHA256=$(sha256sum "$ipk_path" | awk '{print $1}')
-            
-            # 组合写入 Packages
-            # 使用 sed 确保每个 control 段落后都有换行符，避免字段粘连
-            {
-              echo "$CONTROL_CONTENT" | sed '$a\' 
-              echo "Filename: $ipk_name"
-              echo "Size: $FILE_SIZE"
-              echo "SHA256sum: $FILE_SHA256"
-              echo "" 
-            } >> "$PACKAGES_FILE"
+            FILE_SIZE=$(stat -c%s "$apk_path")
+            FILE_SHA256=$(sha256sum "$apk_path" | awk '{print $1}')
             
             # 写入 JSON
             if [ "$first" = true ]; then
@@ -378,25 +365,39 @@ jobs:
             else
               echo "," >> "$JSON_FILE"
             fi
-            echo "{\"target\":\"${arch}\",\"ipk\":\"${ipk_name}\",\"sha256\":\"${FILE_SHA256}\"}" >> "$JSON_FILE"
+            echo "{\"target\":\"${arch}\",\"apk\":\"${apk_name}\",\"size\":\"${FILE_SIZE}\",\"sha256\":\"${FILE_SHA256}\"}" >> "$JSON_FILE"
+            apk_count=$((apk_count + 1))
           done
           
           echo "]" >> "$JSON_FILE"
 
+          if [ "$apk_count" -eq 0 ]; then
+            echo "::error::No APK files found in downloaded artifacts."
+            exit 1
+          fi
+
           echo "${{ env.VERSION }}" > "${{ env.ARTIFACT_DIR }}/version"
           
-          # 生成 Packages.gz
-          gzip -kf "$PACKAGES_FILE"
-      
-      - name: Setup Usign
-        run: |
-          git clone --depth 1 https://git.openwrt.org/project/usign.git
-          cd usign && mkdir build && cd build
-          cmake .. && make -j$(nproc) && sudo make install
+          # 为 apk feed 生成索引
+          docker pull ghcr.io/openwrt/sdk:x86_64-V25.12.0-rc5
+          docker run --rm \
+            -v "$(pwd)/${{ env.ARTIFACT_DIR }}:/work:z" \
+            ghcr.io/openwrt/sdk:x86_64-V25.12.0-rc5 \
+            bash -lc '
+              set -e
+              cd /work
+              apk_bin="/builder/staging_dir/host/bin/apk"
+              if [ ! -x "$apk_bin" ]; then
+                apk_bin="$(command -v apk)"
+              fi
+              [ -x "$apk_bin" ] || { echo "Error: apk tool not found"; exit 1; }
+              apk_files=$(ls -1 *.apk | sort)
+              [ -n "$apk_files" ] || { echo "Error: no apk files for index generation"; exit 1; }
+              $apk_bin mkndx --allow-untrusted --output packages.adb $apk_files
+            '
 
       - name: Deploy to Feed Branch
         env:
-          USIGN_SECRET_KEY_B64: ${{ secrets.USIGN_SECRET_KEY_B64 }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # 1. 配置 Git 用户信息
@@ -422,18 +423,12 @@ jobs:
           touch .nojekyll
           
           # 拷贝新生成的文件
-          cp ../${{ env.ARTIFACT_DIR }}/tailscale_*.ipk ./
-          cp ../${{ env.ARTIFACT_DIR }}/Packages ./
-          cp ../${{ env.ARTIFACT_DIR }}/Packages.gz ./
-
-          # 签名逻辑
-          echo "$USIGN_SECRET_KEY_B64" | base64 -d > key-build.sec
-          usign -S -m Packages -s key-build.sec -x Packages.sig
-          rm -f key-build.sec
+          cp ../${{ env.ARTIFACT_DIR }}/tailscale_*.apk ./
+          cp ../${{ env.ARTIFACT_DIR }}/packages.adb ./
 
           generate_tbody() {
             echo "          <tbody>"
-            for file in Packages* tailscale*; do
+            for file in packages.adb tailscale*; do
               [ -f "${file}" ] || continue
               fname=$(basename "${file}")
               fsize=$(du -h "${file}" | cut -f1)
@@ -491,9 +486,9 @@ jobs:
           tag="${{ env.RELEASE_TAG }}"
           
           # 构建 Markdown 表格
-          table="| Target Platform / 目标平台 | IPK Package (Direct Link) |\n|:--- |:--- |"
+          table="| Target Platform / 目标平台 | APK Package (Direct Link) |\n|:--- |:--- |"
           rows=$(jq -r --arg owner "$owner" --arg repo "$repo" --arg tag "$tag" '
-          .[] | "| \(.target) | [\(.ipk)](https://github.com/\($owner)/\($repo)/releases/download/\($tag)/\(.ipk)) |"
+          .[] | "| \(.target) | [\(.apk)](https://github.com/\($owner)/\($repo)/releases/download/\($tag)/\(.apk)) |"
           ' ${artifacts_file})
           full_table="${table}\n${rows}"
 
@@ -508,17 +503,17 @@ jobs:
           #### 本项目是为 OpenWRT 构建的 Tailscale 精简版本，使用官方 SDK 编译，旨在降低存储空间占用。    
           - 使用 OpenWRT 官方 SDK 编译。  
           - 采用 UPX 压缩技术大幅缩小二进制体积。  
-          - 标准 IPK 格式，支持 opkg 直接安装。  
+          - 标准 APK 格式，适配 OpenWRT 25.12+。  
 
           #### Minimalistic Tailscale build for OpenWRT using the official SDK.  
           - Compiled with official OpenWRT SDK.  
           - Significant size reduction via UPX compression.  
-          - Standard IPK format for direct opkg installation.  
+          - Standard APK format for OpenWRT 25.12+.  
 
           #### Architecture Check / 架构查询  
           Run the following command on your device to confirm target platform:  
           \`\`\`bash
-          opkg print-architecture
+          apk --print-arch
           \`\`\`
 
           ---
@@ -547,9 +542,8 @@ jobs:
           name: "Smaller ${{ env.SOFTWARE_NAME }} ${{ env.RELEASE_TAG }}"
           body: ${{ steps.generate_release_markdown.outputs.release_body }}
           files: |
-            ${{ env.ARTIFACT_DIR }}/*.ipk
-            ${{ env.ARTIFACT_DIR }}/Packages
-            ${{ env.ARTIFACT_DIR }}/Packages.gz
+            ${{ env.ARTIFACT_DIR }}/*.apk
+            ${{ env.ARTIFACT_DIR }}/packages.adb
             ${{ env.ARTIFACT_DIR }}/artifacts.json
             ${{ env.ARTIFACT_DIR }}/version
 
