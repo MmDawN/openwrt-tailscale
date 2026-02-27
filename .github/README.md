@@ -102,7 +102,7 @@ wget -O /usr/bin/install.sh https://ghfast.top/https://raw.githubusercontent.com
 
 #### **添加opkg软件源：**
 
-详见本项目分支 [软件源分支](../feed/README.md) 或本项目opkg软件源页面 [Smaller Tailscale Repository For OpenWrt](https://gunanovo.github.io/openwrt-tailscale/)
+详见本项目分支 [软件源分支](https://github.com/GuNanOvO/openwrt-tailscale/tree/feed) 或本项目opkg软件源页面 [Smaller Tailscale Repository For OpenWrt](https://gunanovo.github.io/openwrt-tailscale/)
 
 仅包含受支持的架构的ipk包
 

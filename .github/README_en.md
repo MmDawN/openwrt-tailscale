@@ -97,7 +97,7 @@ wget -O /usr/sbin/install.sh https://raw.githubusercontent.com/GuNanOvO/openwrt-
 
 #### **Add OPKG Feed**
 
-See the [feed branch README](../feed/README.md)
+See the [feed branch README](https://github.com/GuNanOvO/openwrt-tailscale/tree/feed)
 or the repository page:
 [Smaller Tailscale Repository For OpenWrt](https://gunanovo.github.io/openwrt-tailscale/)
 
